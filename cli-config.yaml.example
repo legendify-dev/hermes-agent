@@ -8,7 +8,7 @@
 model:
   # Default model to use (can be overridden with --model flag)
   # Both "default" and "model" work as the key name here.
-  default: "anthropic/claude-opus-4.6"
+  default: "claude-opus-4-6"
   
   # Inference provider selection:
   #   "auto"         - Auto-detect from credentials (default)
@@ -40,11 +40,11 @@ model:
   #   No API key needed — local servers typically ignore auth.
   #
   # Can also be overridden with --provider flag or HERMES_INFERENCE_PROVIDER env var.
-  provider: "auto"
-  
-  # API configuration (falls back to OPENROUTER_API_KEY env var)
+  provider: "anthropic"
+
+  # API configuration (falls back to ANTHROPIC_API_KEY env var when provider is "anthropic")
   # api_key: "your-key-here"  # Uncomment to set here instead of .env
-  base_url: "https://openrouter.ai/api/v1"
+  # base_url: "https://api.anthropic.com"  # Anthropic's default — only override for Azure/proxies
 
   # ── Token limits — two settings, easy to confuse ──────────────────────────
   #
