@@ -42,6 +42,8 @@ RUN npm install --prefer-offline --no-audit && \
 # ---------- Source code ----------
 # .dockerignore excludes node_modules, so the installs above survive.
 COPY --chown=hermes:hermes . .
+# Ensure the entrypoint is executable regardless of the git-tracked file mode.
+COPY --chmod=0755 docker/entrypoint.sh docker/entrypoint.sh
 
 # Build browser dashboard and terminal UI assets.
 RUN cd web && npm run build && \
