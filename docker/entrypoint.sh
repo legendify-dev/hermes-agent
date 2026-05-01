@@ -41,11 +41,25 @@ if [ "$(id -u)" = "0" ]; then
             echo "Warning: chown failed (rootless container?) — continuing anyway"
     fi
 
-    # Ensure config.yaml is readable by the hermes runtime user even if it was
-    # edited on the host after initial ownership setup. Must run here (as root)
-    # rather than after the gosu drop, otherwise a non-root caller like
+    # Bootstrap config files as root so they are created with correct ownership
+    # from the start. Using `install` sets owner, group, and mode atomically,
+    # avoiding the race where `cp` creates a root-owned file that a subsequent
+    # `chown` fails to fix silently (e.g. in Railway's container environment).
+
+    # .env — create from example if missing, then guarantee hermes can read it.
+    if [ ! -f "$HERMES_HOME/.env" ]; then
+        install -o hermes -g hermes -m 640 "$INSTALL_DIR/.env.example" "$HERMES_HOME/.env"
+    else
+        chown hermes:hermes "$HERMES_HOME/.env" 2>/dev/null || true
+        chmod 640 "$HERMES_HOME/.env" 2>/dev/null || true
+    fi
+
+    # config.yaml — same treatment. Must run here (as root) rather than after
+    # the gosu drop, otherwise a non-root caller like
     # `docker run -u $(id -u):$(id -g)` hits "Operation not permitted" (#15865).
-    if [ -f "$HERMES_HOME/config.yaml" ]; then
+    if [ ! -f "$HERMES_HOME/config.yaml" ]; then
+        install -o hermes -g hermes -m 640 "$INSTALL_DIR/cli-config.yaml.example" "$HERMES_HOME/config.yaml"
+    else
         chown hermes:hermes "$HERMES_HOME/config.yaml" 2>/dev/null || true
         chmod 640 "$HERMES_HOME/config.yaml" 2>/dev/null || true
     fi
@@ -65,16 +79,6 @@ source "${INSTALL_DIR}/.venv/bin/activate"
 # ssh, gh, npm …).  Without it those tools write to /root which is
 # ephemeral and shared across profiles.  See issue #4426.
 mkdir -p "$HERMES_HOME"/{cron,sessions,logs,hooks,memories,skills,skins,plans,workspace,home}
-
-# .env
-if [ ! -f "$HERMES_HOME/.env" ]; then
-    cp "$INSTALL_DIR/.env.example" "$HERMES_HOME/.env"
-fi
-
-# config.yaml
-if [ ! -f "$HERMES_HOME/config.yaml" ]; then
-    cp "$INSTALL_DIR/cli-config.yaml.example" "$HERMES_HOME/config.yaml"
-fi
 
 # SOUL.md
 if [ ! -f "$HERMES_HOME/SOUL.md" ]; then
