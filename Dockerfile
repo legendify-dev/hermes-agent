@@ -20,6 +20,16 @@ RUN apt-get update && \
         sudo curl wget jq postgresql-client && \
     rm -rf /var/lib/apt/lists/*
 
+# Tailscale client for private dashboard access via Headscale (optional,
+# activated by TS_AUTHKEY + TS_LOGIN_SERVER at runtime).
+RUN curl -fsSL https://pkgs.tailscale.com/stable/debian/trixie.noarmor.gpg \
+        -o /usr/share/keyrings/tailscale-archive-keyring.gpg && \
+    curl -fsSL https://pkgs.tailscale.com/stable/debian/trixie.tailscale-keyring.list \
+        -o /etc/apt/sources.list.d/tailscale.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends tailscale && \
+    rm -rf /var/lib/apt/lists/*
+
 # Non-root user for runtime; UID can be overridden via HERMES_UID at runtime.
 # Grant passwordless sudo via a dedicated drop-in (safer than appending to
 # /etc/sudoers — a bad line in the main file disables sudo entirely).
