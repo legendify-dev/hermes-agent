@@ -64,33 +64,6 @@ if [ "$(id -u)" = "0" ]; then
         chmod 640 "$HERMES_HOME/config.yaml" 2>/dev/null || true
     fi
 
-    # --- Tailscale via Headscale (optional, runs as root before gosu drop) ---
-    # Activated when TS_AUTHKEY and TS_LOGIN_SERVER are both set. Uses userspace
-    # networking so no NET_ADMIN / TUN device is required (works on Railway).
-    if [ -n "$TS_AUTHKEY" ] && [ -n "$TS_LOGIN_SERVER" ]; then
-        echo "Starting Tailscale (login-server: $TS_LOGIN_SERVER)..."
-        mkdir -p /var/lib/tailscale /var/run/tailscale
-        tailscaled --tun=userspace-networking \
-                   --statedir=/var/lib/tailscale \
-                   --socket=/var/run/tailscale/tailscaled.sock \
-                   >/var/log/tailscaled.log 2>&1 &
-        for i in $(seq 1 30); do
-            [ -S /var/run/tailscale/tailscaled.sock ] && break
-            sleep 0.5
-        done
-        tailscale up \
-            --login-server="$TS_LOGIN_SERVER" \
-            --authkey="$TS_AUTHKEY" \
-            --hostname="${TS_HOSTNAME:-hermes-dashboard}" \
-            --accept-routes=false \
-            --accept-dns=false || echo "Warning: tailscale up failed"
-        # HTTP only (traffic is encrypted by WireGuard already). HTTPS via
-        # `tailscale serve --https=443` would require Headscale TLS cert
-        # provisioning — skip for now.
-        tailscale serve --bg --http=80 http://127.0.0.1:9119 \
-            || echo "Warning: tailscale serve failed"
-    fi
-
     echo "Dropping root privileges"
     exec gosu hermes "$0" "$@"
 fi
@@ -118,12 +91,16 @@ if [ -d "$INSTALL_DIR/skills" ]; then
 fi
 
 # --- Hermes dashboard (optional, runs alongside gateway) ---
-# Launched in the same conditions as Tailscale (TS_AUTHKEY + TS_LOGIN_SERVER set).
-# Bound to 127.0.0.1 — only `tailscale serve` exposes it to the tailnet.
-if [ -n "$TS_AUTHKEY" ] && [ -n "$TS_LOGIN_SERVER" ]; then
-    echo "Starting Hermes dashboard on 127.0.0.1:9119..."
+# Activated when EXPOSE_DASHBOARD=1. Binds to 0.0.0.0:$PORT so Railway (or any
+# upstream proxy / Cloudflare Tunnel) can reach it. --insecure is required to
+# acknowledge the public bind; auth MUST be provided by the fronting layer
+# (Cloudflare Access in our deployment) — Hermes' built-in session-token model
+# assumes loopback and is not safe alone on a public port.
+if [ "$EXPOSE_DASHBOARD" = "1" ]; then
+    DASHBOARD_PORT="${PORT:-9119}"
+    echo "Starting Hermes dashboard on 0.0.0.0:${DASHBOARD_PORT}..."
     mkdir -p "$HERMES_HOME/logs"
-    hermes dashboard --host 127.0.0.1 --port 9119 --no-open \
+    hermes dashboard --host 0.0.0.0 --port "$DASHBOARD_PORT" --no-open --insecure \
         >> "$HERMES_HOME/logs/dashboard.log" 2>&1 &
 fi
 
