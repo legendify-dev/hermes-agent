@@ -777,16 +777,25 @@ def _load_auth_store(auth_file: Optional[Path] = None) -> Dict[str, Any]:
         raw = json.loads(auth_file.read_text())
     except Exception as exc:
         corrupt_path = auth_file.with_suffix(".json.corrupt")
+        preserved = False
         try:
             import shutil
             shutil.copy2(auth_file, corrupt_path)
+            preserved = True
         except Exception:
             pass
-        logger.warning(
-            "auth: failed to parse %s (%s) — starting with empty store. "
-            "Corrupt file preserved at %s",
-            auth_file, exc, corrupt_path,
-        )
+        if preserved:
+            logger.warning(
+                "auth: failed to parse %s (%s) — starting with empty store. "
+                "Corrupt file preserved at %s",
+                auth_file, exc, corrupt_path,
+            )
+        else:
+            logger.warning(
+                "auth: failed to read %s (%s) — starting with empty store. "
+                "(Could not preserve a copy; check file permissions.)",
+                auth_file, exc,
+            )
         return {"version": AUTH_STORE_VERSION, "providers": {}}
 
     if isinstance(raw, dict) and (
