@@ -39,6 +39,13 @@ if [ "$(id -u)" = "0" ]; then
         # by the mapped user on the host side.
         chown -R hermes:hermes "$HERMES_HOME" 2>/dev/null || \
             echo "Warning: chown failed (rootless container?) — continuing anyway"
+    else
+        # Even when the volume root is correctly owned, individual state files
+        # (auth.json, .hermes_history, …) created by older image builds that
+        # ran without the gosu drop persist as root-owned across redeploys on
+        # a Railway volume, leaving them unreadable to the dropped hermes user.
+        # Sweep the top level for stragglers without paying for a full -R chown.
+        find "$HERMES_HOME" -maxdepth 1 ! -user hermes -exec chown hermes:hermes {} + 2>/dev/null || true
     fi
 
     # Bootstrap config files as root so they are created with correct ownership
