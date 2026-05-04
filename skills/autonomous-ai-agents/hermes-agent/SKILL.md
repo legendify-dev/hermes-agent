@@ -208,6 +208,8 @@ hermes auth remove P INDEX  Remove by provider + index
 hermes auth reset PROVIDER  Clear exhaustion status
 ```
 
+Credential pools automatically rotate API keys when one hits rate limits (429). See **Rate Limit Mitigation** below for workflows.
+
 ### Other
 
 ```
@@ -329,13 +331,13 @@ Edit with `hermes config edit` or `hermes config set section.key value`.
 | `model` | `default`, `provider`, `base_url`, `api_key`, `context_length` |
 | `agent` | `max_turns` (90), `tool_use_enforcement` |
 | `terminal` | `backend` (local/docker/ssh/modal), `cwd`, `timeout` (180) |
-| `compression` | `enabled`, `threshold` (0.50), `target_ratio` (0.20) |
+| `compression` | `enabled`, `threshold` (0.50), `target_ratio` (0.20), `protect_last_n` (20) |
 | `display` | `skin`, `tool_progress`, `show_reasoning`, `show_cost` |
 | `stt` | `enabled`, `provider` (local/groq/openai/mistral) |
 | `tts` | `provider` (edge/elevenlabs/openai/minimax/mistral/neutts) |
 | `memory` | `memory_enabled`, `user_profile_enabled`, `provider` |
 | `security` | `tirith_enabled`, `website_blocklist` |
-| `delegation` | `model`, `provider`, `base_url`, `api_key`, `max_iterations` (50), `reasoning_effort` |
+| `delegation` | `model`, `provider`, `base_url`, `api_key`, `max_iterations` (50), `reasoning_effort`, `max_concurrent_children` (3) |
 | `checkpoints` | `enabled`, `max_snapshots` (50) |
 
 Full config reference: https://hermes-agent.nousresearch.com/docs/user-guide/configuration
@@ -495,6 +497,90 @@ Voice commands: `/voice on` (voice-to-voice), `/voice tts` (always voice), `/voi
 
 ---
 
+## Rate Limit Mitigation
+
+When you hit provider rate limits (429 errors), especially with large context windows, use these strategies:
+
+### 1. Context Compression (Automatic)
+
+Compression triggers automatically when conversation reaches 50% of model's context window:
+
+```yaml
+compression:
+  enabled: true           # Already on by default
+  threshold: 0.5          # Trigger at 50% context usage
+  target_ratio: 0.2       # Compress down to 20%
+  protect_last_n: 20      # Keep last N messages uncompressed
+```
+
+**Adjust threshold to compress sooner:**
+```bash
+hermes config set compression.threshold 0.3    # Trigger at 30% instead
+hermes config set compression.target_ratio 0.15  # More aggressive compression
+```
+
+**Manual compression mid-session:**
+```
+/compress
+```
+
+### 2. Credential Pool Rotation
+
+Add multiple API keys for the same provider — Hermes rotates automatically when one hits 429:
+
+```bash
+# Add multiple keys interactively
+hermes auth add
+# Select provider (e.g., anthropic), paste key, repeat
+
+# View pool
+hermes auth list anthropic
+
+# Pool exhausted? Reset cooldowns manually
+hermes auth reset anthropic
+```
+
+**Pool strategies** (edit config.yaml `credential_pool.strategy`):
+- `round_robin` — cycle evenly (recommended for rate limits)
+- `least_used` — use least-used key first
+- `fill_first` — exhaust one key before moving to next
+- `random` — pick randomly
+
+When a key hits 429, it's marked "exhausted" for 1 hour, and the next key is used automatically.
+
+### 3. Parallelism Control
+
+If you're hitting **throughput limits** (tokens/minute) rather than per-request limits, reduce concurrent subagents:
+
+```bash
+# Default is 3 concurrent subagents
+hermes config set delegation.max_concurrent_children 2
+
+# Increase for higher throughput (uses more tokens/min)
+hermes config set delegation.max_concurrent_children 5
+```
+
+### Combined Workflow
+
+For heavy workloads with large context:
+
+1. Add 3-5 API keys to credential pool
+2. Set pool strategy to `round_robin`
+3. Lower compression threshold to 0.3
+4. Adjust `max_concurrent_children` based on provider limits
+
+```bash
+# Setup
+hermes auth add   # Repeat 3-5 times with different keys
+hermes config set compression.threshold 0.3
+hermes config set delegation.max_concurrent_children 3
+
+# In session
+/compress   # Manually compress before hitting threshold
+```
+
+---
+
 ## Spawning Additional Hermes Instances
 
 Run additional Hermes processes as fully independent subprocesses — separate sessions, tools, and environments.
@@ -614,6 +700,36 @@ Common gateway problems:
 - **Gateway dies on SSH logout**: Enable linger: `sudo loginctl enable-linger $USER`
 - **Gateway dies on WSL2 close**: WSL2 requires `systemd=true` in `/etc/wsl.conf` for systemd services to work. Without it, gateway falls back to `nohup` (dies when session closes).
 - **Gateway crash loop**: Reset the failed state: `systemctl --user reset-failed hermes-gateway`
+
+### Diagnosing gateway platform setup (any platform)
+
+When a platform (Discord, Slack, Telegram, etc.) is "not configured" or not connecting, follow this sequence:
+
+1. Find the hermes binary (not always in PATH):
+   `find /usr/local/bin /opt /root ~/.local/bin -name "hermes" 2>/dev/null`
+   On this deployment: `/opt/hermes/.venv/bin/hermes`
+
+2. Check gateway status:
+   `hermes gateway status`
+
+3. Find config and env file locations (may differ from default ~/.hermes/):
+   `hermes config path` -> e.g. /opt/data/config.yaml
+   `hermes config env-path` -> e.g. /opt/data/.env
+
+4. Check if the platform is configured in config.yaml:
+   `grep -i <platform> /opt/data/config.yaml`
+
+5. Check if the platform token is in .env:
+   `grep -i <platform> /opt/data/.env`
+
+6. If token is missing from .env, add it:
+   - Discord: `DISCORD_BOT_TOKEN=...`
+   - Telegram: `TELEGRAM_BOT_TOKEN=...`
+   - Slack: `SLACK_BOT_TOKEN=...` and `SLACK_APP_TOKEN=...`
+   Then restart: `hermes gateway restart`
+
+7. Run interactive setup to configure a platform from scratch:
+   `hermes gateway setup`
 
 ### Platform-specific issues
 - **Discord bot silent**: Must enable **Message Content Intent** in Bot → Privileged Gateway Intents.
